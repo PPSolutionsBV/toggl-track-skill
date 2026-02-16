@@ -1,63 +1,105 @@
-# Toggl Track
+# Toggl Track Skill for OpenClaw
 
-Complete Toggl Track API v9 integration for OpenClaw.
-
-## Features
-
-- ✅ **Complete API Coverage**: Time entries, projects, clients, tags, workspaces, tasks, groups, organizations, reports, webhooks, expenses
-- ✅ **Pagination Support**: Automatic pagination for large datasets
-- ✅ **Rate Limiting**: Respects API quotas and rate limits
-- ✅ **Type Hints**: Full typing support with dataclass models
-- ✅ **Error Handling**: Comprehensive exception hierarchy
-- ✅ **Bulk Operations**: Patch multiple time entries at once
+Complete Toggl Track API v9 integration for OpenClaw. Fetch time entries, projects, clients, workspaces, tags, and reports.
 
 ## Installation
 
 ```bash
-clawhub install toggl-track --from https://github.com/YOUR_USERNAME/toggl-track
-```
+# Install from GitHub
+clawhub install toggl-track --from https://github.com/YOUR_USERNAME/toggl-track-skill
 
-Or manually:
-```bash
-git clone https://github.com/YOUR_USERNAME/toggl-track.git
-cp -r toggl-track/toggl_track ~/.openclaw/skills/
-```
-
-## Quick Start
-
-```python
-from toggl_track import TogglClient
-
-client = TogglClient(api_token="your_token")
-
-# Get current user
-me = client.me.get()
-print(f"Hello {me.fullname}!")
-
-# List time entries
-entries = client.time_entries.list(
-    start_date="2024-01-01",
-    end_date="2024-01-31"
-)
-
-# Start a timer
-timer = client.time_entries.start(
-    workspace_id=123,
-    description="Working on project"
-)
+# Or manually
+git clone https://github.com/YOUR_USERNAME/toggl-track-skill.git
+cp -r toggl-track-skill/toggl-track ~/.openclaw/skills/
 ```
 
 ## Authentication
 
-Get your API token at: https://track.toggl.com/profile
+Three methods supported:
+
+### 1. API Token (Recommended)
+Get your token at: https://track.toggl.com/profile
 
 ```bash
 export TOGGL_API_TOKEN=your_token_here
 ```
 
-## Documentation
+### 2. Email + Password
+```bash
+export TOGGL_EMAIL=your@email.com
+export TOGGL_PASSWORD=your_password
+```
 
-See [SKILL.md](SKILL.md) for complete API documentation.
+### 3. Session Cookie
+```python
+from toggl_client import TogglClient
+session_cookie = TogglClient.create_session("user@example.com", "password")
+client = TogglClient(session_cookie=session_cookie)
+```
+
+## Quick Start
+
+```python
+from toggl_client import TogglClient
+
+# Connect
+client = TogglClient(api_token="your_token")
+
+# Get current user
+me = client.get_me()
+print(f"Hello {me['fullname']}!")
+
+# Get time entries
+entries = client.get_time_entries(
+    start_date="2024-01-01T00:00:00Z",
+    end_date="2024-01-31T23:59:59Z"
+)
+
+# Get running timer
+current = client.get_current_time_entry()
+if current:
+    print(f"Currently tracking: {current['description']}")
+```
+
+## Fetch All Data
+
+```bash
+# Using API token
+export TOGGL_API_TOKEN=xxx
+python3 scripts/fetch_all.py
+
+# Using email/password
+export TOGGL_EMAIL=user@example.com
+export TOGGL_PASSWORD=secret
+python3 scripts/fetch_all.py
+
+# Custom options
+python3 scripts/fetch_all.py --days 7 --output my_data.json
+```
+
+## Features
+
+- ✅ User & Session management
+- ✅ Workspaces, Projects, Clients, Tags
+- ✅ Time entries (with filters)
+- ✅ Currently running timer
+- ✅ Reports (Summary, Detailed, Weekly)
+- ✅ Multiple authentication methods
+- ✅ Rate limit handling
+
+## API Coverage
+
+| Endpoint | Method | Status |
+|----------|--------|--------|
+| /me | GET | ✅ |
+| /me/time_entries | GET | ✅ |
+| /me/time_entries/current | GET | ✅ |
+| /workspaces | GET | ✅ |
+| /workspaces/{id}/projects | GET/POST | ✅ |
+| /workspaces/{id}/clients | GET/POST | ✅ |
+| /workspaces/{id}/tags | GET/POST | ✅ |
+| /workspaces/{id}/time_entries | GET/POST | ✅ |
+| /reports/api/v3/... | POST | ✅ |
 
 ## License
 
