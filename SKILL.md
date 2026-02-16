@@ -25,12 +25,12 @@ client = TogglClient(api_token="jouw_token")
 
 Set environment variable:
 ```bash
-export TOGGL_API_TOKEN=ef84e82078bd84b40e15e8da92d55524
+export TOGGL_API_TOKEN=je_api_token_hier
 ```
 
 Of gebruik direct in code:
 ```python
-client = TogglClient(api_token="ef84e82078bd84b40e15e8da92d55524")
+client = TogglClient(api_token="je_api_token_hier")
 ```
 
 ### Time Entries
@@ -51,7 +51,7 @@ current = client.time_entries.current()
 
 # Timer starten
 client.time_entries.start(
-    workspace_id=5784952,
+    workspace_id=123456,
     description="Werk aan project",
     project_id=123456
 )
@@ -65,11 +65,11 @@ if current:
 
 ```python
 # Alle projecten
-projects = client.projects.list(workspace_id=5784952)
+projects = client.projects.list(workspace_id=123456)
 
 # Met auto-pagination (alle pagina's)
 projects = client.projects.list(
-    workspace_id=5784952,
+    workspace_id=123456,
     auto_paginate=True
 )
 ```
@@ -79,14 +79,14 @@ projects = client.projects.list(
 ```python
 # Summary report
 report = client.reports.summary(
-    workspace_id=5784952,
+    workspace_id=123456,
     start_date="2026-02-01",
     end_date="2026-02-17"
 )
 
 # Detailed report
 report = client.reports.detailed(
-    workspace_id=5784952,
+    workspace_id=123456,
     start_date="2026-02-01",
     end_date="2026-02-17",
     auto_paginate=True
@@ -97,20 +97,26 @@ report = client.reports.detailed(
 
 ```python
 workspaces = client.workspaces.list()
-workspace = client.workspaces.get(5784952)
+workspace = client.workspaces.get(123456)
 ```
 
 ### Clients & Tags
 
 ```python
-clients = client.clients.list(workspace_id=5784952)
-tags = client.tags.list(workspace_id=5784952)
+clients = client.clients.list(workspace_id=123456)
+tags = client.tags.list(workspace_id=123456)
 ```
 
 ## API Token
 
-Workspace: PP Solutions Toggl (ID: 5784952)
-Token: `ef84e82078bd84b40e15e8da92d55524`
+Haal je API token op bij: https://track.toggl.com/profile
+
+Workspace ID vind je in de Toggl web interface URL of via:
+```python
+workspaces = client.workspaces.list()
+for ws in workspaces:
+    print(f"{ws.name}: {ws.id}")
+```
 
 ## Beschikbare Endpoints
 
