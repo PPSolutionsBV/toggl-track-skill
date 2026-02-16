@@ -1,6 +1,6 @@
 ---
 name: toggl-track
-description: Complete Toggl Track time tracking integration. Use when the user wants to retrieve, create, update, or manage time entries, projects, clients, workspaces, tags, or reports from Toggl Track. Handles authentication via API token, fetches all data types including running timers, and supports both personal and workspace-level queries.
+description: Complete Toggl Track time tracking integration. Use when the user wants to retrieve, create, update, or manage time entries, projects, clients, workspaces, tags, or reports from Toggl Track. Handles authentication via API token, email/password, or session cookie. Fetches all data types including running timers, and supports both personal and workspace-level queries.
 ---
 
 # Toggl Track Skill
@@ -70,7 +70,8 @@ https://api.track.toggl.com/api/v9
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/me` | GET | Current user details, workspaces, preferences |
+| `/me` | GET | Current user details |
+| `/me?with_related_data=true` | GET | User + all related data (workspaces, projects, clients, tags, tasks, time_entries) |
 | `/me/logged` | GET | Check if authenticated |
 | `/me/reset_token` | POST | Reset API token |
 
@@ -90,6 +91,7 @@ https://api.track.toggl.com/api/v9
 |----------|--------|-------------|
 | `/workspaces/{workspace_id}/projects` | GET | List projects |
 | `/workspaces/{workspace_id}/projects/{project_id}` | GET | Project details |
+| `/workspaces/{workspace_id}/project_users` | GET | Project users |
 
 ### Clients
 
@@ -108,10 +110,13 @@ https://api.track.toggl.com/api/v9
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/me/time_entries` | GET | Current user's time entries |
+| `/me/time_entries` | GET | Current user's time entries (returns `{items: [...]}`) |
+| `/me/time_entries/{id}` | GET | Get time entry by ID |
 | `/me/time_entries/current` | GET | Currently running timer |
-| `/workspaces/{workspace_id}/time_entries` | GET | Workspace time entries |
-| `/workspaces/{workspace_id}/time_entries/{entry_id}` | GET/PUT/DELETE | Single entry operations |
+| `/workspaces/{workspace_id}/time_entries` | POST | Create time entry |
+| `/workspaces/{workspace_id}/time_entries/{id}` | PUT | Update time entry |
+| `/workspaces/{workspace_id}/time_entries/{ids}` | PATCH | Bulk patch time entries |
+| `/workspaces/{workspace_id}/time_entries/{id}` | DELETE | Delete time entry |
 
 ### Reports
 
@@ -123,28 +128,87 @@ https://api.track.toggl.com/api/v9
 
 ## Query Parameters
 
-### Time Entries
+### GET /me
 
-- `start_date` / `end_date`: ISO 8601 format (e.g., `2024-01-01T00:00:00Z`)
-- `description`: Filter by description text
-- `project_ids`: Comma-separated project IDs
-- `client_ids`: Comma-separated client IDs
-- `tag_ids`: Comma-separated tag IDs
-- `billable`: `true` or `false`
+- `with_related_data`: Include all related entities (clients, projects, tags, tasks, workspaces, time_entries)
 
-### Reports
+### GET /me/time_entries
 
-All reports use POST with JSON body:
+**IMPORTANT:** Returns a dict with `items` key, not a direct list!
+
+- `start_date`: Start date (YYYY-MM-DD or RFC3339)
+- `end_date`: End date (YYYY-MM-DD or RFC3339)
+- `since`: Unix timestamp to get entries modified since (includes deleted)
+- `before`: Get entries before this date
+- `meta`: Include meta entity data (client_name, project_name, etc.)
+- `include_sharing`: Include sharing details
+
+### GET /workspaces/{id}/projects
+
+- `active`: Filter by status (`true`, `false`)
+- `since`: Unix timestamp to get projects modified since
+
+### POST /workspaces/{id}/time_entries (Create)
+
+**Important fields:**
+- `workspace_id`: Required
+- `description`: Time entry description
+- `duration`: Duration in seconds. **For running entries: `-1 * (Unix timestamp)`**
+- `start`: Start time (ISO 8601)
+- `stop`: Stop time (ISO 8601), omit for running entries
+- `project_id`: Project ID
+- `task_id`: Task ID
+- `tags`: List of tag names
+- `tag_ids`: List of tag IDs
+- `billable`: Whether billable
+- `created_with`: Client identifier (required)
+
+**Legacy fields (still supported):**
+- `pid`: project_id
+- `tid`: task_id  
+- `wid`: workspace_id
+- `uid`: user_id
+- `duronly`: Deprecated but still used
+
+## Response Formats
+
+### Time Entries Response
 
 ```json
 {
-  "start_date": "2024-01-01",
-  "end_date": "2024-01-31",
-  "description": "optional filter",
-  "project_ids": [123, 456],
-  "client_ids": [789],
-  "tag_ids": [101, 102],
-  "billable": true
+  "items": [
+    {
+      "id": 123456789,
+      "workspace_id": 123,
+      "project_id": 456,
+      "task_id": null,
+      "billable": false,
+      "start": "2024-01-15T09:00:00Z",
+      "stop": "2024-01-15T10:30:00Z",
+      "duration": 5400,
+      "description": "Working on feature",
+      "tags": ["development"],
+      "tag_ids": [789],
+      "client_name": "Client Name",
+      "project_name": "Project Name",
+      "user_name": "User Name"
+    }
+  ]
+}
+```
+
+### Running Timer
+
+For running entries:
+- `duration` is negative: `-1 * (Unix timestamp of start time)`
+- `stop` is null
+
+Example:
+```json
+{
+  "duration": -1705312800,
+  "stop": null,
+  "start": "2024-01-15T09:00:00Z"
 }
 ```
 
@@ -160,31 +224,37 @@ All reports use POST with JSON body:
 Use the provided scripts for common operations:
 
 - `scripts/toggl_client.py` - Python client with all API methods
-- `scripts/fetch_all.py` - Fetch all data (workspaces, projects, entries)
+- `scripts/fetch_all.py` - Fetch all data using with_related_data
 
 ## Common Workflows
 
-### Get Current User Info
-```bash
-curl -u $TOGGL_API_TOKEN:api_token https://api.track.toggl.com/api/v9/me
+### Get Current User with All Data
+```python
+me = client.get_me(with_related_data=True)
+# Returns: user + workspaces + projects + clients + tags + tasks + time_entries
 ```
 
-### Get Time Entries for Date Range
-```bash
-curl -u $TOGGL_API_TOKEN:api_token \
-  "https://api.track.toggl.com/api/v9/me/time_entries?start_date=2024-01-01T00:00:00Z&end_date=2024-01-31T23:59:59Z"
+### Get Time Entries (Correct Way)
+```python
+result = client.get_time_entries(start_date="2024-01-01", end_date="2024-01-31")
+entries = result['items']  # Note: result is a dict, not a list!
+```
+
+### Start a Running Timer
+```python
+# Duration is calculated automatically as -1 * Unix timestamp
+entry = client.start_time_entry(
+    workspace_id=123,
+    description="Working on feature",
+    project_id=456
+)
 ```
 
 ### Get Currently Running Timer
-```bash
-curl -u $TOGGL_API_TOKEN:api_token \
-  https://api.track.toggl.com/api/v9/me/time_entries/current
-```
-
-### Get Workspace Projects
-```bash
-curl -u $TOGGL_API_TOKEN:api_token \
-  https://api.track.toggl.com/api/v9/workspaces/{workspace_id}/projects
+```python
+current = client.get_current_time_entry()
+if current:
+    print(f"Running: {current['description']}")
 ```
 
 ## Error Handling

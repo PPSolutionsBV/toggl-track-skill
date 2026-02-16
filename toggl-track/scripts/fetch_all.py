@@ -5,6 +5,12 @@ Fetch all Toggl Track data
 Usage:
     export TOGGL_API_TOKEN=your_token_here
     python3 fetch_all.py [--days 30] [--output toggl_data.json]
+    
+    OR
+    
+    export TOGGL_EMAIL=your@email.com
+    export TOGGL_PASSWORD=your_password
+    python3 fetch_all.py [--days 30] [--output toggl_data.json]
 """
 
 import argparse
@@ -19,6 +25,9 @@ from toggl_client import TogglClient
 
 def format_duration(seconds: int) -> str:
     """Format seconds as HH:MM:SS"""
+    if seconds < 0:
+        # Running entry - calculate current duration
+        seconds = int(datetime.now(timezone.utc).timestamp()) + seconds
     hours = seconds // 3600
     minutes = (seconds % 3600) // 60
     secs = seconds % 60
@@ -26,9 +35,9 @@ def format_duration(seconds: int) -> str:
 
 
 def fetch_all_data(client: TogglClient, days: int = 30) -> dict:
-    """Fetch comprehensive Toggl data"""
+    """Fetch comprehensive Toggl data using with_related_data for efficiency"""
     
-    print(f"📊 Fetching all Toggl Track data (last {days} days)...")
+    print(f"📊 Fetching all Toggl Track data...")
     print()
     
     data = {
@@ -39,76 +48,47 @@ def fetch_all_data(client: TogglClient, days: int = 30) -> dict:
         "summary": {}
     }
     
-    # 1. User info
-    print("👤 Fetching user info...")
-    data["user"] = client.get_me()
-    print(f"   ✓ {data['user'].get('fullname', 'Unknown')} ({data['user'].get('email', 'No email')})")
+    # 1. User info with all related data (efficient single call)
+    print("👤 Fetching user info with related data...")
+    me = client.get_me(with_related_data=True)
+    data["user"] = me
     
-    # 2. Workspaces with details
-    print("\n🏢 Fetching workspaces...")
-    workspaces = client.get_workspaces()
+    print(f"   ✓ {me.get('fullname', 'Unknown')} ({me.get('email', 'No email')})")
+    print(f"   ✓ {len(me.get('workspaces') or [])} workspaces")
+    print(f"   ✓ {len(me.get('projects') or [])} projects")
+    print(f"   ✓ {len(me.get('clients') or [])} clients")
+    print(f"   ✓ {len(me.get('tags') or [])} tags")
+    print(f"   ✓ {len(me.get('time_entries') or [])} time entries (from related data)")
     
-    for ws in workspaces:
-        ws_id = ws["id"]
-        ws_name = ws.get("name", f"Workspace {ws_id}")
-        print(f"\n   📁 {ws_name}")
+    # Store related data
+    data["workspaces"] = me.get('workspaces') or []
+    data["projects"] = me.get('projects') or []
+    data["clients"] = me.get('clients') or []
+    data["tags"] = me.get('tags') or []
+    data["time_entries"] = me.get('time_entries') or []
+    
+    # 2. Get additional time entries for date range if needed
+    if days > 0:
+        print(f"\n⏱️  Fetching time entries for last {days} days...")
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=days)
         
-        ws_data = {
-            **ws,
-            "projects": [],
-            "clients": [],
-            "tags": [],
-            "users": []
-        }
+        result = client.get_time_entries(
+            start_date=start.strftime("%Y-%m-%d"),
+            end_date=end.strftime("%Y-%m-%d"),
+            meta=True
+        )
         
-        # Projects
-        try:
-            ws_data["projects"] = client.get_projects(ws_id)
-            print(f"      📂 {len(ws_data['projects'])} projects")
-        except Exception as e:
-            print(f"      ⚠️  Could not fetch projects: {e}")
+        entries = result.get('items', [])
+        print(f"   ✓ {len(entries)} entries found")
         
-        # Clients
-        try:
-            ws_data["clients"] = client.get_clients(ws_id)
-            print(f"      👥 {len(ws_data['clients'])} clients")
-        except Exception as e:
-            print(f"      ⚠️  Could not fetch clients: {e}")
-        
-        # Tags
-        try:
-            ws_data["tags"] = client.get_tags(ws_id)
-            print(f"      🏷️  {len(ws_data['tags'])} tags")
-        except Exception as e:
-            print(f"      ⚠️  Could not fetch tags: {e}")
-        
-        # Users (if admin)
-        try:
-            ws_data["users"] = client.get_workspace_users(ws_id)
-            print(f"      👤 {len(ws_data['users'])} users")
-        except Exception as e:
-            print(f"      ℹ️  Could not fetch users (may need admin access)")
-        
-        data["workspaces"].append(ws_data)
+        # Merge with existing entries (avoid duplicates)
+        existing_ids = {e.get('id') for e in data['time_entries']}
+        for entry in entries:
+            if entry.get('id') not in existing_ids:
+                data['time_entries'].append(entry)
     
-    # 3. Time entries
-    print(f"\n⏱️  Fetching time entries (last {days} days)...")
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(days=days)
-    
-    data["time_entries"] = client.get_time_entries(
-        start_date=start.isoformat(),
-        end_date=end.isoformat()
-    )
-    
-    total_duration = sum(
-        entry.get("duration", 0) for entry in data["time_entries"] if entry.get("duration", 0) > 0
-    )
-    
-    print(f"   ✓ {len(data['time_entries'])} entries")
-    print(f"   ✓ Total time: {format_duration(total_duration)}")
-    
-    # 4. Currently running timer
+    # 3. Currently running timer
     print("\n⏲️  Checking for running timer...")
     current = client.get_current_time_entry()
     if current:
@@ -117,30 +97,40 @@ def fetch_all_data(client: TogglClient, days: int = 30) -> dict:
     else:
         print("   ✓ No timer running")
     
-    # 5. Summary statistics
+    # 4. Summary statistics
     print("\n📈 Calculating summary...")
+    
+    # Calculate total duration
+    total_duration = 0
+    for entry in data["time_entries"]:
+        duration = entry.get("duration", 0)
+        if duration > 0:
+            total_duration += duration
     
     # Group by project
     project_times = {}
     for entry in data["time_entries"]:
         pid = entry.get("project_id")
         if pid:
-            project_times[pid] = project_times.get(pid, 0) + entry.get("duration", 0)
+            project_times[pid] = project_times.get(pid, 0) + max(0, entry.get("duration", 0))
     
     # Group by date
     daily_times = {}
     for entry in data["time_entries"]:
-        date = entry.get("start", "")[:10]  # YYYY-MM-DD
-        if date:
-            daily_times[date] = daily_times.get(date, 0) + entry.get("duration", 0)
+        start = entry.get("start", "")
+        if start:
+            date = start[:10]  # YYYY-MM-DD
+            duration = entry.get("duration", 0)
+            if duration > 0:
+                daily_times[date] = daily_times.get(date, 0) + duration
     
     data["summary"] = {
         "total_entries": len(data["time_entries"]),
         "total_duration_seconds": total_duration,
         "total_duration_formatted": format_duration(total_duration),
         "date_range": {
-            "start": start.isoformat(),
-            "end": end.isoformat()
+            "start": (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(),
+            "end": datetime.now(timezone.utc).isoformat()
         },
         "project_breakdown": {
             str(pid): format_duration(dur) 
@@ -203,6 +193,8 @@ def main():
         data = fetch_all_data(client, days=args.days)
     except Exception as e:
         print(f"\n❌ Error fetching data: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
     
     # Save to file
@@ -218,6 +210,9 @@ def main():
     print("="*50)
     print(f"User:        {data['user'].get('fullname', 'Unknown')}")
     print(f"Workspaces:  {len(data['workspaces'])}")
+    print(f"Projects:    {len(data.get('projects', []))}")
+    print(f"Clients:     {len(data.get('clients', []))}")
+    print(f"Tags:        {len(data.get('tags', []))}")
     print(f"Entries:     {data['summary']['total_entries']}")
     print(f"Total time:  {data['summary']['total_duration_formatted']}")
     

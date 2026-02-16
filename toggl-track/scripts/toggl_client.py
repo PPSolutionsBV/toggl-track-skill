@@ -6,20 +6,20 @@ Usage:
     
     client = TogglClient(api_token="your_token_here")
     
-    # Get current user
-    me = client.get_me()
+    # Get current user with all related data
+    me = client.get_me(with_related_data=True)
     
-    # Get time entries
-    entries = client.get_time_entries(start_date="2024-01-01", end_date="2024-01-31")
+    # Get time entries (returns dict with 'items' key)
+    result = client.get_time_entries(start_date="2024-01-01", end_date="2024-01-31")
+    entries = result['items']
     
     # Get running timer
     current = client.get_current_time_entry()
 """
 
 import os
-import base64
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 import requests
 
 
@@ -104,26 +104,19 @@ class TogglClient:
         response.raise_for_status()
         return response.json() if response.content else None
     
+    def _patch(self, endpoint: str, data: Optional[Dict] = None) -> Any:
+        """Make PATCH request to Toggl API"""
+        url = f"{self.BASE_URL}{endpoint}"
+        response = self.session.patch(url, json=data)
+        response.raise_for_status()
+        return response.json() if response.content else None
+    
     def _delete(self, endpoint: str) -> bool:
         """Make DELETE request to Toggl API"""
         url = f"{self.BASE_URL}{endpoint}"
         response = self.session.delete(url)
         response.raise_for_status()
         return response.status_code == 200
-    
-    # ==================== User & Session ====================
-    
-    def get_me(self) -> Dict[str, Any]:
-        """Get current user details including workspaces"""
-        return self._get("/me")
-    
-    def check_logged_in(self) -> bool:
-        """Check if authentication is working"""
-        try:
-            self._get("/me/logged")
-            return True
-        except requests.HTTPError:
-            return False
     
     # ==================== Authentication Methods ====================
     
@@ -164,6 +157,32 @@ class TogglClient:
         result = self._post("/me/reset_token")
         return result.get("api_token")
     
+    # ==================== User & Session ====================
+    
+    def get_me(self, with_related_data: bool = False) -> Dict[str, Any]:
+        """
+        Get current user details.
+        
+        Args:
+            with_related_data: If True, includes clients, projects, tasks, tags, 
+                              workspaces, and time_entries in the response
+        
+        Returns:
+            User details dict. Related data fields are null if with_related_data=False
+        """
+        params = {}
+        if with_related_data:
+            params["with_related_data"] = "true"
+        return self._get("/me", params)
+    
+    def check_logged_in(self) -> bool:
+        """Check if authentication is working"""
+        try:
+            self._get("/me/logged")
+            return True
+        except requests.HTTPError:
+            return False
+    
     # ==================== Workspaces ====================
     
     def get_workspaces(self) -> List[Dict[str, Any]]:
@@ -175,7 +194,7 @@ class TogglClient:
         return self._get(f"/workspaces/{workspace_id}")
     
     def get_workspace_users(self, workspace_id: int) -> List[Dict[str, Any]]:
-        """Get all users in a workspace"""
+        """Get all users in a workspace (legacy endpoint)"""
         return self._get(f"/workspaces/{workspace_id}/users") or []
     
     def get_workspace_groups(self, workspace_id: int) -> List[Dict[str, Any]]:
@@ -188,17 +207,25 @@ class TogglClient:
     
     # ==================== Projects ====================
     
-    def get_projects(self, workspace_id: int, active: Optional[bool] = None) -> List[Dict[str, Any]]:
+    def get_projects(
+        self, 
+        workspace_id: int, 
+        active: Optional[bool] = None,
+        since: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get all projects in a workspace
         
         Args:
             workspace_id: The workspace ID
             active: Filter by active status (True/False/None for all)
+            since: Unix timestamp to get projects modified since
         """
         params = {}
         if active is not None:
             params["active"] = "true" if active else "false"
+        if since is not None:
+            params["since"] = since
         return self._get(f"/workspaces/{workspace_id}/projects", params) or []
     
     def get_project(self, workspace_id: int, project_id: int) -> Dict[str, Any]:
@@ -217,6 +244,36 @@ class TogglClient:
     def delete_project(self, workspace_id: int, project_id: int) -> bool:
         """Delete a project"""
         return self._delete(f"/workspaces/{workspace_id}/projects/{project_id}")
+    
+    # ==================== Project Users ====================
+    
+    def get_project_users(
+        self,
+        workspace_id: int,
+        project_ids: Optional[List[int]] = None,
+        user_id: Optional[int] = None,
+        with_group_members: Optional[bool] = None
+    ) -> Dict[str, Any]:
+        """
+        Get project users for a workspace
+        
+        Args:
+            workspace_id: The workspace ID
+            project_ids: Filter by specific project IDs (comma-separated)
+            user_id: Filter by specific user
+            with_group_members: Include group members
+            
+        Returns:
+            Dict with 'items' key containing list of project users
+        """
+        params = {}
+        if project_ids:
+            params["project_ids"] = ",".join(map(str, project_ids))
+        if user_id:
+            params["user_id"] = user_id
+        if with_group_members is not None:
+            params["with_group_members"] = "true" if with_group_members else "false"
+        return self._get(f"/workspaces/{workspace_id}/project_users", params) or {"items": []}
     
     # ==================== Clients ====================
     
@@ -249,121 +306,196 @@ class TogglClient:
         self,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        description: Optional[str] = None,
-        project_ids: Optional[List[int]] = None,
-        client_ids: Optional[List[int]] = None,
-        tag_ids: Optional[List[int]] = None,
-        billable: Optional[bool] = None
-    ) -> List[Dict[str, Any]]:
+        since: Optional[int] = None,
+        before: Optional[str] = None,
+        meta: Optional[bool] = None,
+        include_sharing: Optional[bool] = None
+    ) -> Dict[str, Any]:
         """
         Get time entries for current user
         
+        IMPORTANT: Returns a dict with 'items' key, not a direct list!
+        
         Args:
-            start_date: Start date in ISO 8601 format (e.g., "2024-01-01T00:00:00Z")
-            end_date: End date in ISO 8601 format
-            description: Filter by description text
-            project_ids: Filter by project IDs
-            client_ids: Filter by client IDs
-            tag_ids: Filter by tag IDs
-            billable: Filter by billable status
+            start_date: Start date (YYYY-MM-DD or RFC3339)
+            end_date: End date (YYYY-MM-DD or RFC3339)
+            since: Unix timestamp to get entries modified since (includes deleted)
+            before: Get entries before this date
+            meta: Include meta entity data (client_name, project_name, etc.)
+            include_sharing: Include sharing details
+            
+        Returns:
+            Dict with 'items' key containing list of time entries
         """
         params = {}
         if start_date:
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
-        if description:
-            params["description"] = description
-        if project_ids:
-            params["project_ids"] = ",".join(map(str, project_ids))
-        if client_ids:
-            params["client_ids"] = ",".join(map(str, client_ids))
-        if tag_ids:
-            params["tag_ids"] = ",".join(map(str, tag_ids))
-        if billable is not None:
-            params["billable"] = "true" if billable else "false"
+        if since:
+            params["since"] = since
+        if before:
+            params["before"] = before
+        if meta is not None:
+            params["meta"] = "true" if meta else "false"
+        if include_sharing is not None:
+            params["include_sharing"] = "true" if include_sharing else "false"
         
-        return self._get("/me/time_entries", params) or []
+        return self._get("/me/time_entries", params) or {"items": []}
+    
+    def get_time_entry_by_id(
+        self,
+        time_entry_id: int,
+        meta: Optional[bool] = None,
+        include_sharing: Optional[bool] = None
+    ) -> Dict[str, Any]:
+        """
+        Get a specific time entry by ID
+        
+        Args:
+            time_entry_id: The time entry ID
+            meta: Include meta entity data
+            include_sharing: Include sharing details
+        """
+        params = {}
+        if meta is not None:
+            params["meta"] = "true" if meta else "false"
+        if include_sharing is not None:
+            params["include_sharing"] = "true" if include_sharing else "false"
+        return self._get(f"/me/time_entries/{time_entry_id}", params)
     
     def get_current_time_entry(self) -> Optional[Dict[str, Any]]:
         """Get currently running time entry (timer)"""
         return self._get("/me/time_entries/current")
     
-    def get_workspace_time_entries(
+    def create_time_entry(
         self,
         workspace_id: int,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        user_ids: Optional[List[int]] = None,
-        description: Optional[str] = None,
-        project_ids: Optional[List[int]] = None,
-        client_ids: Optional[List[int]] = None,
-        tag_ids: Optional[List[int]] = None
-    ) -> List[Dict[str, Any]]:
-        """Get time entries for a workspace (admin access required)"""
-        params = {}
-        if start_date:
-            params["start_date"] = start_date
-        if end_date:
-            params["end_date"] = end_date
-        if user_ids:
-            params["user_ids"] = ",".join(map(str, user_ids))
-        if description:
-            params["description"] = description
-        if project_ids:
-            params["project_ids"] = ",".join(map(str, project_ids))
-        if client_ids:
-            params["client_ids"] = ",".join(map(str, client_ids))
-        if tag_ids:
-            params["tag_ids"] = ",".join(map(str, tag_ids))
+        description: str,
+        duration: int,
+        start: str,
+        project_id: Optional[int] = None,
+        task_id: Optional[int] = None,
+        tags: Optional[List[str]] = None,
+        tag_ids: Optional[List[int]] = None,
+        billable: bool = False,
+        stop: Optional[str] = None,
+        duronly: bool = False,
+        created_with: str = "toggl-track-skill"
+    ) -> Dict[str, Any]:
+        """
+        Create a new time entry
         
-        return self._get(f"/workspaces/{workspace_id}/time_entries", params) or []
-    
-    def get_time_entry(self, workspace_id: int, entry_id: int) -> Dict[str, Any]:
-        """Get specific time entry"""
-        return self._get(f"/workspaces/{workspace_id}/time_entries/{entry_id}")
+        Args:
+            workspace_id: Workspace ID (required)
+            description: Time entry description
+            duration: Duration in seconds. For running entries, use -1 * (Unix start time)
+            start: Start time (ISO 8601)
+            project_id: Project ID
+            task_id: Task ID
+            tags: List of tag names
+            tag_ids: List of tag IDs
+            billable: Whether billable
+            stop: Stop time (ISO 8601), omit for running entries
+            duronly: Create with duration but without stop time (deprecated)
+            created_with: Client identifier
+        """
+        data = {
+            "workspace_id": workspace_id,
+            "description": description,
+            "duration": duration,
+            "start": start,
+            "billable": billable,
+            "duronly": duronly,
+            "created_with": created_with
+        }
+        
+        if project_id:
+            data["project_id"] = project_id
+        if task_id:
+            data["task_id"] = task_id
+        if tags:
+            data["tags"] = tags
+        if tag_ids:
+            data["tag_ids"] = tag_ids
+        if stop:
+            data["stop"] = stop
+            
+        return self._post(f"/workspaces/{workspace_id}/time_entries", data)
     
     def start_time_entry(
         self,
         workspace_id: int,
         description: str,
         project_id: Optional[int] = None,
+        task_id: Optional[int] = None,
         tags: Optional[List[str]] = None,
         billable: bool = False,
-        start_date: Optional[str] = None
+        created_with: str = "toggl-track-skill"
     ) -> Dict[str, Any]:
-        """Start a new time entry (timer)"""
-        data = {
-            "workspace_id": workspace_id,
-            "description": description,
-            "billable": billable,
-            "created_with": "toggl-track-skill"
-        }
-        if project_id:
-            data["project_id"] = project_id
-        if tags:
-            data["tags"] = tags
-        if start_date:
-            data["start"] = start_date
-        else:
-            data["start"] = datetime.now(timezone.utc).isoformat()
+        """
+        Start a new running timer
         
-        return self._post(f"/workspaces/{workspace_id}/time_entries", data)
+        For running entries, duration should be -1 * (Unix timestamp of start time)
+        """
+        start_time = datetime.now(timezone.utc)
+        start_iso = start_time.isoformat()
+        # For running entries: duration = -1 * Unix timestamp
+        duration = int(-1 * start_time.timestamp())
+        
+        return self.create_time_entry(
+            workspace_id=workspace_id,
+            description=description,
+            duration=duration,
+            start=start_iso,
+            project_id=project_id,
+            task_id=task_id,
+            tags=tags,
+            billable=billable,
+            created_with=created_with
+        )
     
-    def stop_time_entry(self, workspace_id: int, entry_id: int) -> Dict[str, Any]:
-        """Stop a running time entry"""
-        url = f"{self.BASE_URL}/workspaces/{workspace_id}/time_entries/{entry_id}/stop"
-        response = self.session.patch(url)
-        response.raise_for_status()
-        return response.json() if response.content else {}
-    
-    def update_time_entry(self, workspace_id: int, entry_id: int, **kwargs) -> Dict[str, Any]:
+    def update_time_entry(
+        self,
+        workspace_id: int,
+        time_entry_id: int,
+        **kwargs
+    ) -> Dict[str, Any]:
         """Update a time entry"""
-        return self._put(f"/workspaces/{workspace_id}/time_entries/{entry_id}", kwargs)
+        return self._put(f"/workspaces/{workspace_id}/time_entries/{time_entry_id}", kwargs)
     
-    def delete_time_entry(self, workspace_id: int, entry_id: int) -> bool:
+    def patch_time_entries(
+        self,
+        workspace_id: int,
+        time_entry_ids: List[int],
+        operations: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Bulk patch multiple time entries (RFC 6902 JSON Patch)
+        
+        Args:
+            workspace_id: Workspace ID
+            time_entry_ids: List of time entry IDs to patch
+            operations: List of patch operations [{"op": "replace", "path": "/description", "value": "new"}]
+            
+        Returns:
+            Dict with 'success' and 'failure' keys
+        """
+        ids_str = ",".join(map(str, time_entry_ids))
+        return self._patch(f"/workspaces/{workspace_id}/time_entries/{ids_str}", operations)
+    
+    def stop_time_entry(self, workspace_id: int, time_entry_id: int) -> Dict[str, Any]:
+        """
+        Stop a running time entry
+        
+        Note: The stop endpoint may vary by API version. This uses PUT to update stop time.
+        """
+        stop_time = datetime.now(timezone.utc).isoformat()
+        return self.update_time_entry(workspace_id, time_entry_id, stop=stop_time)
+    
+    def delete_time_entry(self, workspace_id: int, time_entry_id: int) -> bool:
         """Delete a time entry"""
-        return self._delete(f"/workspaces/{workspace_id}/time_entries/{entry_id}")
+        return self._delete(f"/workspaces/{workspace_id}/time_entries/{time_entry_id}")
     
     # ==================== Reports ====================
     
@@ -485,63 +617,27 @@ class TogglClient:
     
     # ==================== Utility Methods ====================
     
-    def get_all_data(self) -> Dict[str, Any]:
+    def get_all_data(self, days: int = 30) -> Dict[str, Any]:
         """
-        Fetch all relevant data for the user:
-        - User profile
-        - Workspaces
-        - Projects per workspace
-        - Clients per workspace
-        - Tags per workspace
-        - Recent time entries (last 30 days)
+        Fetch all relevant data for the user using with_related_data parameter
+        
+        This is more efficient than making separate calls.
+        
+        Args:
+            days: Number of days of time entries to fetch (if not using with_related_data)
+            
+        Returns:
+            Dict with user data including related entities
         """
-        from datetime import datetime, timedelta
-        
-        result = {
-            "user": self.get_me(),
-            "workspaces": [],
-            "time_entries": []
-        }
-        
-        workspaces = self.get_workspaces()
-        
-        for ws in workspaces:
-            ws_id = ws["id"]
-            ws_data = {
-                **ws,
-                "projects": self.get_projects(ws_id),
-                "clients": self.get_clients(ws_id),
-                "tags": self.get_tags(ws_id)
-            }
-            result["workspaces"].append(ws_data)
-        
-        # Get time entries for last 30 days
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(days=30)
-        result["time_entries"] = self.get_time_entries(
-            start_date=start.isoformat(),
-            end_date=end.isoformat()
-        )
-        
-        return result
+        # Get user with all related data
+        return self.get_me(with_related_data=True)
 
 
 if __name__ == "__main__":
-    # Example usage with different authentication methods
+    # Example usage
     import json
     
-    # Method 1: API Token (recommended)
-    # Get your token at: https://track.toggl.com/profile
     token = os.getenv("TOGGL_API_TOKEN")
-    
-    # Method 2: Email/Password
-    # email = os.getenv("TOGGL_EMAIL")
-    # password = os.getenv("TOGGL_PASSWORD")
-    
-    # Method 3: Create session from email/password
-    # session_cookie = TogglClient.create_session("user@example.com", "password")
-    # client = TogglClient(session_cookie=session_cookie)
-    
     if not token:
         print("Please set TOGGL_API_TOKEN environment variable")
         print("Or use TOGGL_EMAIL and TOGGL_PASSWORD")
@@ -558,15 +654,21 @@ if __name__ == "__main__":
         print("✗ Authentication failed")
         exit(1)
     
-    # Get user info
-    me = client.get_me()
-    print(f"\nUser: {me.get('fullname', 'Unknown')} ({me.get('email', 'No email')})")
+    # Get user info with related data
+    print("\nFetching user data with related entities...")
+    me = client.get_me(with_related_data=True)
+    print(f"User: {me.get('fullname', 'Unknown')} ({me.get('email', 'No email')})")
+    print(f"Workspaces: {len(me.get('workspaces') or [])}")
+    print(f"Projects: {len(me.get('projects') or [])}")
+    print(f"Clients: {len(me.get('clients') or [])}")
+    print(f"Tags: {len(me.get('tags') or [])}")
+    print(f"Time entries: {len(me.get('time_entries') or [])}")
     
-    # Get workspaces
-    workspaces = client.get_workspaces()
-    print(f"\nWorkspaces ({len(workspaces)}):")
-    for ws in workspaces:
-        print(f"  - {ws.get('name')} (ID: {ws.get('id')})")
+    # Get time entries with proper response format
+    print("\nFetching time entries...")
+    result = client.get_time_entries(meta=True)
+    entries = result.get('items', [])
+    print(f"Found {len(entries)} time entries")
     
     # Get current timer
     current = client.get_current_time_entry()
