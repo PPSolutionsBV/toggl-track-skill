@@ -73,13 +73,12 @@ def fetch_all_data(client: TogglClient, days: int = 30) -> dict:
         end = datetime.now(timezone.utc)
         start = end - timedelta(days=days)
         
-        result = client.get_time_entries(
+        entries = client.get_time_entries(
             start_date=start.strftime("%Y-%m-%d"),
             end_date=end.strftime("%Y-%m-%d"),
             meta=True
         )
         
-        entries = result.get('items', [])
         print(f"   ✓ {len(entries)} entries found")
         
         # Merge with existing entries (avoid duplicates)

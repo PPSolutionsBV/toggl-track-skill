@@ -134,7 +134,7 @@ https://api.track.toggl.com/api/v9
 
 ### GET /me/time_entries
 
-**IMPORTANT:** Returns a dict with `items` key, not a direct list!
+Returns a **list** of time entries directly (not wrapped in a dict).
 
 - `start_date`: Start date (YYYY-MM-DD or RFC3339)
 - `end_date`: End date (YYYY-MM-DD or RFC3339)
@@ -236,8 +236,10 @@ me = client.get_me(with_related_data=True)
 
 ### Get Time Entries (Correct Way)
 ```python
-result = client.get_time_entries(start_date="2024-01-01", end_date="2024-01-31")
-entries = result['items']  # Note: result is a dict, not a list!
+entries = client.get_time_entries(start_date="2024-01-01", end_date="2024-01-31")
+# Returns a list directly!
+for entry in entries:
+    print(f"{entry['description']} - {entry.get('project_name', 'No project')}")
 ```
 
 ### Start a Running Timer

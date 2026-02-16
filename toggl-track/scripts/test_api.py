@@ -62,12 +62,10 @@ def test_connection():
     # Test get_time_entries
     print("\n⏱️  Test get_time_entries()...")
     try:
-        result = client.get_time_entries()
-        print(f"✓ Response type: {type(result)}")
-        print(f"✓ Response keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+        entries = client.get_time_entries()
+        print(f"✓ Response type: {type(entries)}")
         
-        if isinstance(result, dict) and 'items' in result:
-            entries = result['items']
+        if isinstance(entries, list):
             print(f"✓ Aantal entries: {len(entries)}")
             
             if entries:
@@ -78,7 +76,7 @@ def test_connection():
                 print(f"    Duration: {entry.get('duration')}")
                 print(f"    Start: {entry.get('start')}")
         else:
-            print(f"⚠️  Unexpected response format: {result}")
+            print(f"⚠️  Unexpected response format: {entries}")
     except Exception as e:
         print(f"❌ get_time_entries error: {e}")
         import traceback

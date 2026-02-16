@@ -9,9 +9,8 @@ Usage:
     # Get current user with all related data
     me = client.get_me(with_related_data=True)
     
-    # Get time entries (returns dict with 'items' key)
-    result = client.get_time_entries(start_date="2024-01-01", end_date="2024-01-31")
-    entries = result['items']
+    # Get time entries (returns list directly)
+    entries = client.get_time_entries(start_date="2024-01-01", end_date="2024-01-31")
     
     # Get running timer
     current = client.get_current_time_entry()
@@ -310,11 +309,11 @@ class TogglClient:
         before: Optional[str] = None,
         meta: Optional[bool] = None,
         include_sharing: Optional[bool] = None
-    ) -> Dict[str, Any]:
+    ) -> List[Dict[str, Any]]:
         """
         Get time entries for current user
         
-        IMPORTANT: Returns a dict with 'items' key, not a direct list!
+        Returns a list of time entries directly (not wrapped in dict).
         
         Args:
             start_date: Start date (YYYY-MM-DD or RFC3339)
@@ -325,7 +324,7 @@ class TogglClient:
             include_sharing: Include sharing details
             
         Returns:
-            Dict with 'items' key containing list of time entries
+            List of time entry dictionaries
         """
         params = {}
         if start_date:
@@ -341,7 +340,9 @@ class TogglClient:
         if include_sharing is not None:
             params["include_sharing"] = "true" if include_sharing else "false"
         
-        return self._get("/me/time_entries", params) or {"items": []}
+        result = self._get("/me/time_entries", params)
+        # API returns a list directly, not wrapped in dict
+        return result if isinstance(result, list) else []
     
     def get_time_entry_by_id(
         self,
