@@ -1,347 +1,183 @@
-# Toggl Track Skill for OpenClaw
+# Toggl Track Skill
 
-Complete Toggl Track API v9 integration for OpenClaw. Production-ready client with full API coverage.
+## Beschrijving
 
-## Features
+Complete Toggl Track API integratie voor tijdregistratie, projecten, rapporten en meer.
 
-- ✅ **Complete API Coverage**: Time entries, projects, clients, tags, workspaces, tasks, reports
-- ✅ **Pagination Support**: Automatic pagination for large datasets
-- ✅ **Rate Limiting**: Respects API quotas and rate limits
-- ✅ **Type Hints**: Full typing support with dataclass models
-- ✅ **Error Handling**: Comprehensive exception hierarchy
-- ✅ **Bulk Operations**: Patch multiple time entries at once
-
-## Installation
+## Installatie
 
 ```bash
-# Copy to OpenClaw skills directory
-cp -r toggl-track-complete ~/.openclaw/skills/toggl-track
-
-# Or install via clawhub (when published)
-clawhub install toggl-track
+git clone https://github.com/PPSolutionsBV/toggl-track-skill.git /tmp/toggl-track
+cp -r /tmp/toggl-track/toggl_track ~/.openclaw/skills/
 ```
 
-## Authentication
+## Gebruik
 
-Get your API token at: https://track.toggl.com/profile
-
-### Method 1: Environment Variable (Recommended)
-```bash
-export TOGGL_API_TOKEN=your_token_here
-```
-
-### Method 2: Direct
-```python
-from toggl_track import TogglClient
-client = TogglClient(api_token="your_token")
-```
-
-## Quick Start
+### Basis gebruik
 
 ```python
 from toggl_track import TogglClient
 
-# Connect
-client = TogglClient()
-
-# Get current user
-me = client.me.get()
-print(f"Hello {me.fullname}!")
-
-# List workspaces
-workspaces = client.workspaces.list()
-for ws in workspaces:
-    print(f"Workspace: {ws.name}")
-
-# Get time entries
-entries = client.time_entries.list(
-    start_date="2024-01-01",
-    end_date="2024-01-31"
-)
-
-# Start a timer
-timer = client.time_entries.start(
-    workspace_id=123,
-    description="Working on project",
-    project_id=456
-)
-
-# Stop current timer
-current = client.time_entries.current()
-if current:
-    client.time_entries.stop(current.workspace_id, current.id)
+client = TogglClient(api_token="jouw_token")
 ```
 
-## API Reference
+### Authenticatie
+
+Set environment variable:
+```bash
+export TOGGL_API_TOKEN=ef84e82078bd84b40e15e8da92d55524
+```
+
+Of gebruik direct in code:
+```python
+client = TogglClient(api_token="ef84e82078bd84b40e15e8da92d55524")
+```
 
 ### Time Entries
 
 ```python
-# List entries
+# Lijst ophalen (laatste 7 dagen)
+from datetime import datetime, timedelta
+end = datetime.now()
+start = end - timedelta(days=7)
+
 entries = client.time_entries.list(
-    start_date="2024-01-01",
-    end_date="2024-01-31",
-    meta=True  # Include project/client names
+    start_date=start.strftime("%Y-%m-%d"),
+    end_date=end.strftime("%Y-%m-%d")
 )
 
-# Get current running timer
+# Huidige timer
 current = client.time_entries.current()
 
-# Create entry
-entry = client.time_entries.create(
-    workspace_id=123,
-    description="Meeting",
-    duration=3600,
-    start="2024-01-15T10:00:00Z"
+# Timer starten
+client.time_entries.start(
+    workspace_id=5784952,
+    description="Werk aan project",
+    project_id=123456
 )
 
-# Start timer
-entry = client.time_entries.start(
-    workspace_id=123,
-    description="Working",
-    project_id=456,
-    tags=["important"]
-)
-
-# Stop timer
-entry = client.time_entries.stop(workspace_id, entry_id)
-
-# Update entry
-entry = client.time_entries.update(
-    workspace_id,
-    entry_id,
-    description="Updated description"
-)
-
-# Delete entry
-client.time_entries.delete(workspace_id, entry_id)
-
-# Bulk patch (max 100)
-result = client.time_entries.patch(
-    workspace_id=123,
-    time_entry_ids=[1, 2, 3],
-    operations=[
-        {"op": "replace", "path": "/description", "value": "New desc"}
-    ]
-)
+# Timer stoppen
+if current:
+    client.time_entries.stop(current.workspace_id, current.id)
 ```
 
-### Projects
+### Projecten
 
 ```python
-# List with pagination
+# Alle projecten
+projects = client.projects.list(workspace_id=5784952)
+
+# Met auto-pagination (alle pagina's)
 projects = client.projects.list(
-    workspace_id=123,
-    active=True,
-    page=1,
-    per_page=50,
-    auto_paginate=True  # Fetch all pages
+    workspace_id=5784952,
+    auto_paginate=True
 )
-
-# Create
-project = client.projects.create(
-    workspace_id=123,
-    name="New Project",
-    client_id=456,
-    color="#06aaf5"
-)
-
-# Update
-project = client.projects.update(
-    workspace_id,
-    project_id,
-    name="Updated Name"
-)
-
-# Delete
-client.projects.delete(workspace_id, project_id)
 ```
 
-### Project Users
-
-```python
-# List users
-users = client.project_users.list(workspace_id=123)
-
-# Add user
-pu = client.project_users.add(
-    workspace_id=123,
-    project_id=456,
-    user_id=789,
-    manager=True
-)
-
-# Update
-pu = client.project_users.update(
-    workspace_id,
-    project_user_id,
-    manager=False
-)
-
-# Remove
-client.project_users.delete(workspace_id, project_user_id)
-```
-
-### Reports
+### Rapporten
 
 ```python
 # Summary report
 report = client.reports.summary(
-    workspace_id=123,
-    start_date="2024-01-01",
-    end_date="2024-01-31"
+    workspace_id=5784952,
+    start_date="2026-02-01",
+    end_date="2026-02-17"
 )
 
-# Detailed report with pagination
+# Detailed report
 report = client.reports.detailed(
-    workspace_id=123,
-    start_date="2024-01-01",
-    end_date="2024-01-31",
+    workspace_id=5784952,
+    start_date="2026-02-01",
+    end_date="2026-02-17",
     auto_paginate=True
-)
-
-# Weekly report
-report = client.reports.weekly(
-    workspace_id=123,
-    start_date="2024-01-01",
-    end_date="2024-01-31"
 )
 ```
 
 ### Workspaces
 
 ```python
-# List
 workspaces = client.workspaces.list()
-
-# Get
-workspace = client.workspaces.get(workspace_id)
-
-# Update
-workspace = client.workspaces.update(
-    workspace_id,
-    name="New Name"
-)
-
-# List users
-users = client.workspace_users.list(
-    organization_id=123,
-    workspace_id=456,
-    auto_paginate=True
-)
-
-# Groups
-groups = client.workspaces.groups(workspace_id)
+workspace = client.workspaces.get(5784952)
 ```
 
-### Clients
+### Clients & Tags
 
 ```python
-# List
-clients = client.clients.list(workspace_id)
-
-# Create
-client_obj = client.clients.create(workspace_id, name="Client Name")
-
-# Update
-client.clients.update(workspace_id, client_id, name="New Name")
-
-# Delete
-client.clients.delete(workspace_id, client_id)
+clients = client.clients.list(workspace_id=5784952)
+tags = client.tags.list(workspace_id=5784952)
 ```
 
-### Tags
+## API Token
+
+Workspace: PP Solutions Toggl (ID: 5784952)
+Token: `ef84e82078bd84b40e15e8da92d55524`
+
+## Beschikbare Endpoints
+
+- `client.me` - Gebruiker info
+- `client.time_entries` - Tijdregistraties
+- `client.projects` - Projecten
+- `client.project_users` - Project gebruikers
+- `client.clients` - Klanten
+- `client.tags` - Tags
+- `client.workspaces` - Workspaces
+- `client.workspace_users` - Workspace gebruikers
+- `client.tasks` - Taken
+- `client.groups` - Groepen
+- `client.organizations` - Organisaties
+- `client.reports` - Rapporten (summary, detailed, weekly)
+- `client.webhooks` - Webhooks
+- `client.expenses` - Onkosten
+
+## Voorbeelden
+
+### Wat heb ik vandaag gedaan?
 
 ```python
-# List
-tags = client.tags.list(workspace_id)
+from datetime import datetime
+from toggl_track import TogglClient
 
-# Create
-tag = client.tags.create(workspace_id, name="urgent")
+client = TogglClient()
+today = datetime.now().strftime("%Y-%m-%d")
 
-# Update
-client.tags.update(workspace_id, tag_id, name="high-priority")
-
-# Delete
-client.tags.delete(workspace_id, tag_id)
-```
-
-### Tasks
-
-```python
-# List
-tasks = client.tasks.list(workspace_id, project_id=123)
-
-# Create
-task = client.tasks.create(
-    workspace_id,
-    project_id=123,
-    name="New Task",
-    estimated_seconds=3600
+entries = client.time_entries.list(
+    start_date=today,
+    end_date=today,
+    meta=True
 )
 
-# Update
-client.tasks.update(workspace_id, task_id, name="Updated")
+for e in entries:
+    print(f"{e.description} - {e.duration/60:.0f} min")
+```
 
-# Delete
-client.tasks.delete(workspace_id, task_id)
+### Totaal uren deze week
+
+```python
+from datetime import datetime, timedelta
+from toggl_track import TogglClient
+
+client = TogglClient()
+end = datetime.now()
+start = end - timedelta(days=7)
+
+entries = client.time_entries.list(
+    start_date=start.strftime("%Y-%m-%d"),
+    end_date=end.strftime("%Y-%m-%d")
+)
+
+total = sum(e.duration for e in entries if e.duration > 0)
+print(f"Totaal: {total/3600:.2f} uur")
 ```
 
 ## Error Handling
 
 ```python
-from toggl_track import (
-    TogglClient,
-    TogglAuthError,
-    TogglRateLimitError,
-    TogglQuotaError,
-    TogglNotFoundError,
-)
-
-client = TogglClient()
+from toggl_track import TogglClient, TogglAuthError, TogglRateLimitError
 
 try:
-    entry = client.time_entries.get(99999)
+    client = TogglClient()
 except TogglAuthError:
-    print("Invalid credentials")
+    print("Ongeldige credentials")
 except TogglRateLimitError as e:
-    print(f"Rate limited. Retry after {e.retry_after} seconds")
-except TogglQuotaError as e:
-    print(f"Quota exceeded. Resets in {e.quota_resets_in} seconds")
-except TogglNotFoundError:
-    print("Time entry not found")
+    print(f"Rate limit, wacht {e.retry_after} seconden")
 ```
-
-## Scripts
-
-### Fetch All Data
-```bash
-export TOGGL_API_TOKEN=xxx
-python scripts/fetch_all.py --days 30 --output data.json
-```
-
-## Models
-
-All API responses are parsed into typed dataclasses:
-
-- `User` - User account info
-- `TimeEntry` - Time tracking entry
-- `Project` - Project details
-- `Client` - Client information
-- `Tag` - Tag details
-- `Workspace` - Workspace settings
-- `Task` - Task information
-- `ProjectUser` - Project membership
-- `WorkspaceUser` - Workspace membership
-- `Report` - Report data
-
-## Rate Limits
-
-The client automatically handles:
-- **Request rate**: 1 request per second (configurable)
-- **Quota headers**: Respects X-Toggl-Quota-Remaining
-- **Retry-After**: Waits when rate limited (429)
-
-## License
-
-MIT
